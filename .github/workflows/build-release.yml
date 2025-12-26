@@ -1,0 +1,171 @@
+name: Build & Release APK
+
+on:
+  push:
+    branches: [main]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build APKs
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Build Debug APKs
+        run: ./gradlew assembleDebug
+
+      - name: Build Release APKs
+        run: ./gradlew assembleRelease
+
+      - name: List APKs
+        run: |
+          echo "=== Debug APKs ==="
+          find app/build/outputs/apk/debug -name "*.apk" -type f
+          echo "=== Release APKs ==="
+          find app/build/outputs/apk/release -name "*.apk" -type f
+
+      - name: Upload Debug APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-apks
+          path: app/build/outputs/apk/debug/*.apk
+          retention-days: 7
+
+      - name: Upload Release APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-apks
+          path: app/build/outputs/apk/release/*.apk
+          retention-days: 30
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Build Release APKs
+        run: ./gradlew assembleRelease
+
+      - name: Sign APKs (if keystore provided)
+        if: env.KEYSTORE_BASE64 != ''
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 -d > keystore.jks
+
+          for apk in app/build/outputs/apk/release/*.apk; do
+            if [[ "$apk" != *"-signed.apk" ]]; then
+              signed_apk="${apk%.apk}-signed.apk"
+              ${ANDROID_HOME}/build-tools/34.0.0/apksigner sign \
+                --ks keystore.jks \
+                --ks-pass pass:$KEYSTORE_PASSWORD \
+                --key-pass pass:$KEY_PASSWORD \
+                --ks-key-alias $KEY_ALIAS \
+                --out "$signed_apk" \
+                "$apk"
+            fi
+          done
+
+          rm keystore.jks
+
+      - name: Rename APKs for release
+        run: |
+          cd app/build/outputs/apk/release
+          VERSION="${GITHUB_REF#refs/tags/}"
+
+          for apk in *.apk; do
+            if [[ "$apk" == *"universal"* ]]; then
+              mv "$apk" "Droid2Run-${VERSION}-universal.apk"
+            elif [[ "$apk" == *"arm64-v8a"* ]]; then
+              mv "$apk" "Droid2Run-${VERSION}-arm64-v8a.apk"
+            elif [[ "$apk" == *"armeabi-v7a"* ]]; then
+              mv "$apk" "Droid2Run-${VERSION}-armeabi-v7a.apk"
+            elif [[ "$apk" == *"x86_64"* ]]; then
+              mv "$apk" "Droid2Run-${VERSION}-x86_64.apk"
+            elif [[ "$apk" == *"x86"* ]] && [[ "$apk" != *"x86_64"* ]]; then
+              mv "$apk" "Droid2Run-${VERSION}-x86.apk"
+            fi
+          done
+
+          ls -la
+
+      - name: Generate Checksums
+        run: |
+          cd app/build/outputs/apk/release
+          sha256sum *.apk > checksums.sha256
+          cat checksums.sha256
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: Droid2Run ${{ github.ref_name }}
+          body: |
+            ## Droid2Run ${{ github.ref_name }}
+
+            Run virtual machines on your Android device using QEMU.
+
+            ### Downloads
+
+            | File | Description |
+            |------|-------------|
+            | `Droid2Run-*-universal.apk` | Universal build (all architectures, larger size) |
+            | `Droid2Run-*-arm64-v8a.apk` | For modern 64-bit ARM devices (most phones) |
+            | `Droid2Run-*-armeabi-v7a.apk` | For older 32-bit ARM devices |
+            | `Droid2Run-*-x86_64.apk` | For x86_64 devices/emulators |
+            | `Droid2Run-*-x86.apk` | For x86 devices/emulators |
+
+            ### Which APK should I download?
+
+            - **Most users**: Download `arm64-v8a` (modern Android phones)
+            - **Older phones**: Download `armeabi-v7a`
+            - **Not sure**: Download `universal` (works everywhere, but larger)
+
+            ### Checksums
+
+            See `checksums.sha256` for SHA-256 checksums of all files.
+
+          files: |
+            app/build/outputs/apk/release/*.apk
+            app/build/outputs/apk/release/checksums.sha256
+          draft: false
+          prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

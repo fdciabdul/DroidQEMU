@@ -40,6 +40,35 @@ android {
         compose = true
         viewBinding = true
     }
+
+    // Split APKs by ABI for smaller downloads
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
+            isUniversalApk = true // Also build universal APK
+        }
+    }
+
+    // Version code per ABI
+    val abiCodes = mapOf(
+        "armeabi-v7a" to 1,
+        "arm64-v8a" to 2,
+        "x86" to 3,
+        "x86_64" to 4
+    )
+
+    applicationVariants.all {
+        val variant = this
+        variant.outputs.all {
+            val output = this as com.android.build.gradle.internal.api.ApkVariantOutputImpl
+            val abi = output.getFilter(com.android.build.api.variant.FilterConfiguration.FilterType.ABI.name)
+            if (abi != null) {
+                output.versionCodeOverride = (abiCodes[abi] ?: 0) + variant.versionCode * 10
+            }
+        }
+    }
 }
 
 // Termux terminal libraries
