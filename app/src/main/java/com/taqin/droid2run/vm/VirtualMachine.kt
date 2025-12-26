@@ -237,20 +237,24 @@ class VirtualMachineManager(private val context: Context) {
         // Machine type based on OS - optimized for TCG (software emulation)
         when (config.arch) {
             VMArch.X86_64, VMArch.I386 -> {
-                cmd.addAll(listOf("-machine", "pc"))
-                cmd.addAll(listOf("-cpu", "max"))
-                cmd.addAll(listOf("-accel", "tcg,thread=multi"))
+                // Use isapc for fastest boot, pc for compatibility
+                cmd.addAll(listOf("-machine", "pc,accel=tcg"))
+                // Use qemu64 for speed - simpler than max
+                cmd.addAll(listOf("-cpu", "qemu64"))
             }
             VMArch.AARCH64, VMArch.ARM -> {
-                cmd.addAll(listOf("-machine", "virt"))
-                cmd.addAll(listOf("-cpu", "max"))
-                cmd.addAll(listOf("-accel", "tcg,thread=multi"))
+                cmd.addAll(listOf("-machine", "virt,accel=tcg"))
+                cmd.addAll(listOf("-cpu", "cortex-a53"))
             }
         }
 
-        // Memory and CPUs - single CPU is often faster in TCG
+        // Memory and CPUs - single CPU is faster in TCG
         cmd.addAll(listOf("-m", "${config.memory}M"))
-        cmd.addAll(listOf("-smp", "1")) // Single CPU faster for TCG emulation
+        cmd.addAll(listOf("-smp", "1"))
+
+        // Speed optimizations
+        cmd.addAll(listOf("-global", "isa-debugcon.chardev=null"))
+        cmd.addAll(listOf("-chardev", "null,id=null"))
 
         // ACPI is enabled by default on PC machines
         // Use -no-acpi to disable if needed
@@ -258,9 +262,14 @@ class VirtualMachineManager(private val context: Context) {
             cmd.add("-no-acpi")
         }
 
-        // VGA display - use cirrus for speed (simpler emulation)
-        cmd.addAll(listOf("-vga", "std"))
-        cmd.addAll(listOf("-display", "none")) // VNC only, no display overhead
+        // VGA display - cirrus is faster than std for TCG
+        val vga = when (config.osType) {
+            OSType.LINUX -> "virtio" // Fastest for Linux with drivers
+            OSType.WINDOWS_XP -> "cirrus" // XP has cirrus driver
+            else -> "std" // Safe default
+        }
+        cmd.addAll(listOf("-vga", vga))
+        cmd.addAll(listOf("-display", "none")) // VNC only
 
         // Disk - Use IDE for Windows compatibility (no drivers needed)
         val diskFile = config.diskImage ?: File(imagesDir, "${config.id}.qcow2").absolutePath

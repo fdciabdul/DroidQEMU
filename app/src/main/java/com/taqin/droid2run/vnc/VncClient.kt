@@ -28,7 +28,16 @@ class VncClient {
         private const val ENCODING_RAW = 0
         private const val ENCODING_COPYRECT = 1
         private const val ENCODING_DESKTOP_SIZE = -223
+        private const val ENCODING_CURSOR = -239
+        private const val ENCODING_X_CURSOR = -240
     }
+
+    // Cursor state
+    private var cursorX = 0
+    private var cursorY = 0
+    private var cursorBitmap: Bitmap? = null
+    private var cursorHotX = 0
+    private var cursorHotY = 0
 
     private var socket: Socket? = null
     private var input: DataInputStream? = null
@@ -184,10 +193,12 @@ class VncClient {
     private fun setEncodings() {
         output?.writeByte(2) // Message type: SetEncodings
         output?.writeByte(0) // Padding
-        output?.writeShort(2) // Number of encodings
+        output?.writeShort(4) // Number of encodings
 
         output?.writeInt(ENCODING_RAW)
         output?.writeInt(ENCODING_DESKTOP_SIZE)
+        output?.writeInt(ENCODING_CURSOR)
+        output?.writeInt(ENCODING_X_CURSOR)
 
         output?.flush()
     }
@@ -239,11 +250,16 @@ class VncClient {
             when (encoding) {
                 ENCODING_RAW -> handleRawRect(x, y, w, h)
                 ENCODING_DESKTOP_SIZE -> handleDesktopSize(w, h)
+                ENCODING_CURSOR -> handleCursor(x, y, w, h)
+                ENCODING_X_CURSOR -> handleXCursor(x, y, w, h)
                 else -> Log.w(TAG, "Unsupported encoding: $encoding")
             }
         }
 
-        _frameBuffer.value = framebuffer
+        // Draw cursor on framebuffer copy
+        val displayBitmap = framebuffer?.copy(Bitmap.Config.ARGB_8888, true)
+        displayBitmap?.let { drawCursor(it) }
+        _frameBuffer.value = displayBitmap ?: framebuffer
         requestFramebufferUpdate(true)
     }
 
@@ -265,6 +281,133 @@ class VncClient {
         height = h
         framebuffer = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         framebuffer?.eraseColor(Color.BLACK)
+    }
+
+    private fun handleCursor(hotX: Int, hotY: Int, w: Int, h: Int) {
+        cursorHotX = hotX
+        cursorHotY = hotY
+
+        if (w == 0 || h == 0) {
+            cursorBitmap = null
+            return
+        }
+
+        // Read cursor pixels (ARGB)
+        val pixels = IntArray(w * h)
+        for (i in pixels.indices) {
+            val b = input?.readUnsignedByte() ?: 0
+            val g = input?.readUnsignedByte() ?: 0
+            val r = input?.readUnsignedByte() ?: 0
+            val a = input?.readUnsignedByte() ?: 255
+            pixels[i] = Color.argb(a, r, g, b)
+        }
+
+        // Read bitmask
+        val maskBytes = ((w + 7) / 8) * h
+        input?.skipBytes(maskBytes)
+
+        cursorBitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        cursorBitmap?.setPixels(pixels, 0, w, 0, 0, w, h)
+    }
+
+    private fun handleXCursor(hotX: Int, hotY: Int, w: Int, h: Int) {
+        cursorHotX = hotX
+        cursorHotY = hotY
+
+        if (w == 0 || h == 0) {
+            cursorBitmap = null
+            return
+        }
+
+        // Read foreground/background colors
+        val fgR = input?.readUnsignedByte() ?: 255
+        val fgG = input?.readUnsignedByte() ?: 255
+        val fgB = input?.readUnsignedByte() ?: 255
+        val bgR = input?.readUnsignedByte() ?: 0
+        val bgG = input?.readUnsignedByte() ?: 0
+        val bgB = input?.readUnsignedByte() ?: 0
+
+        val fg = Color.rgb(fgR, fgG, fgB)
+        val bg = Color.rgb(bgR, bgG, bgB)
+
+        val rowBytes = (w + 7) / 8
+
+        // Read bitmap
+        val bitmap = ByteArray(rowBytes * h)
+        input?.readFully(bitmap)
+
+        // Read mask
+        val mask = ByteArray(rowBytes * h)
+        input?.readFully(mask)
+
+        // Create cursor bitmap
+        val pixels = IntArray(w * h)
+        for (y in 0 until h) {
+            for (x in 0 until w) {
+                val byteIdx = y * rowBytes + x / 8
+                val bitIdx = 7 - (x % 8)
+                val maskBit = (mask[byteIdx].toInt() shr bitIdx) and 1
+                val bitmapBit = (bitmap[byteIdx].toInt() shr bitIdx) and 1
+
+                pixels[y * w + x] = if (maskBit == 1) {
+                    if (bitmapBit == 1) fg else bg
+                } else {
+                    Color.TRANSPARENT
+                }
+            }
+        }
+
+        cursorBitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        cursorBitmap?.setPixels(pixels, 0, w, 0, 0, w, h)
+    }
+
+    private fun drawCursor(bitmap: Bitmap) {
+        val cursor = cursorBitmap ?: createDefaultCursor()
+        val canvas = Canvas(bitmap)
+        val x = (cursorX - cursorHotX).coerceIn(0, bitmap.width - 1)
+        val y = (cursorY - cursorHotY).coerceIn(0, bitmap.height - 1)
+        canvas.drawBitmap(cursor, x.toFloat(), y.toFloat(), null)
+    }
+
+    private fun createDefaultCursor(): Bitmap {
+        // Simple arrow cursor
+        val size = 16
+        val cursor = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(cursor)
+        val paint = Paint().apply {
+            isAntiAlias = true
+            style = Paint.Style.FILL
+        }
+
+        // White arrow with black outline
+        val path = android.graphics.Path().apply {
+            moveTo(0f, 0f)
+            lineTo(0f, 14f)
+            lineTo(4f, 10f)
+            lineTo(7f, 15f)
+            lineTo(9f, 14f)
+            lineTo(6f, 9f)
+            lineTo(11f, 9f)
+            close()
+        }
+
+        paint.color = Color.BLACK
+        canvas.drawPath(path, paint)
+
+        val innerPath = android.graphics.Path().apply {
+            moveTo(1f, 1f)
+            lineTo(1f, 12f)
+            lineTo(4f, 9f)
+            lineTo(6f, 13f)
+            lineTo(7f, 12f)
+            lineTo(5f, 8f)
+            lineTo(9f, 8f)
+            close()
+        }
+        paint.color = Color.WHITE
+        canvas.drawPath(innerPath, paint)
+
+        return cursor
     }
 
     private fun handleSetColorMapEntries() {
@@ -303,6 +446,8 @@ class VncClient {
 
     fun sendPointerEvent(x: Int, y: Int, buttonMask: Int) {
         try {
+            cursorX = x
+            cursorY = y
             output?.writeByte(5) // Message type: PointerEvent
             output?.writeByte(buttonMask)
             output?.writeShort(x)

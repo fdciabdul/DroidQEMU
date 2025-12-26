@@ -410,6 +410,9 @@ class KeyboardInputView(context: Context) : View(context) {
     init {
         isFocusable = true
         isFocusableInTouchMode = true
+        // Make it visible but tiny
+        minimumWidth = 1
+        minimumHeight = 1
     }
 
     fun setOnKeyListener(listener: (Int, Boolean) -> Unit) {
@@ -417,8 +420,10 @@ class KeyboardInputView(context: Context) : View(context) {
     }
 
     override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection {
-        outAttrs.inputType = InputType.TYPE_CLASS_TEXT
-        outAttrs.imeOptions = EditorInfo.IME_FLAG_NO_FULLSCREEN
+        outAttrs.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+        outAttrs.imeOptions = EditorInfo.IME_FLAG_NO_FULLSCREEN or EditorInfo.IME_FLAG_NO_EXTRACT_UI
+        outAttrs.initialSelStart = 0
+        outAttrs.initialSelEnd = 0
         return VncInputConnection(this, keyListener)
     }
 
@@ -457,7 +462,7 @@ class KeyboardInputView(context: Context) : View(context) {
 class VncInputConnection(
     private val view: View,
     private val keyListener: ((Int, Boolean) -> Unit)?
-) : android.view.inputmethod.BaseInputConnection(view, true) {
+) : android.view.inputmethod.BaseInputConnection(view, false) {
 
     override fun commitText(text: CharSequence?, newCursorPosition: Int): Boolean {
         text?.forEach { char ->
@@ -470,12 +475,48 @@ class VncInputConnection(
         return true
     }
 
+    override fun setComposingText(text: CharSequence?, newCursorPosition: Int): Boolean {
+        // Commit composing text immediately
+        return commitText(text, newCursorPosition)
+    }
+
+    override fun finishComposingText(): Boolean {
+        return true
+    }
+
     override fun deleteSurroundingText(beforeLength: Int, afterLength: Int): Boolean {
         repeat(beforeLength) {
             keyListener?.invoke(X11KeySyms.XK_BackSpace, true)
             keyListener?.invoke(X11KeySyms.XK_BackSpace, false)
         }
+        repeat(afterLength) {
+            keyListener?.invoke(X11KeySyms.XK_Delete, true)
+            keyListener?.invoke(X11KeySyms.XK_Delete, false)
+        }
         return true
+    }
+
+    override fun sendKeyEvent(event: KeyEvent?): Boolean {
+        event?.let {
+            val keySym = when (it.keyCode) {
+                KeyEvent.KEYCODE_DEL -> X11KeySyms.XK_BackSpace
+                KeyEvent.KEYCODE_FORWARD_DEL -> X11KeySyms.XK_Delete
+                KeyEvent.KEYCODE_ENTER -> X11KeySyms.XK_Return
+                KeyEvent.KEYCODE_TAB -> X11KeySyms.XK_Tab
+                KeyEvent.KEYCODE_SPACE -> X11KeySyms.XK_space
+                KeyEvent.KEYCODE_DPAD_UP -> X11KeySyms.XK_Up
+                KeyEvent.KEYCODE_DPAD_DOWN -> X11KeySyms.XK_Down
+                KeyEvent.KEYCODE_DPAD_LEFT -> X11KeySyms.XK_Left
+                KeyEvent.KEYCODE_DPAD_RIGHT -> X11KeySyms.XK_Right
+                else -> 0
+            }
+            if (keySym != 0) {
+                val down = it.action == KeyEvent.ACTION_DOWN
+                keyListener?.invoke(keySym, down)
+                return true
+            }
+        }
+        return super.sendKeyEvent(event)
     }
 
     private fun charToX11KeySym(char: Char): Int {
