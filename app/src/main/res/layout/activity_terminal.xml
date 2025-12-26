@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#000000">
+
+    <com.termux.view.TerminalView
+        android:id="@+id/terminal_view"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_above="@+id/extra_keys_container"
+        android:focusable="true"
+        android:focusableInTouchMode="true" />
+
+    <HorizontalScrollView
+        android:id="@+id/extra_keys_container"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_alignParentBottom="true"
+        android:background="#1a1a1a"
+        android:scrollbars="none">
+
+        <LinearLayout
+            android:id="@+id/extra_keys"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:padding="4dp">
+
+            <Button
+                android:id="@+id/btn_esc"
+                style="@style/TerminalButton"
+                android:text="ESC" />
+
+            <Button
+                android:id="@+id/btn_ctrl"
+                style="@style/TerminalButton"
+                android:text="CTRL" />
+
+            <Button
+                android:id="@+id/btn_alt"
+                style="@style/TerminalButton"
+                android:text="ALT" />
+
+            <Button
+                android:id="@+id/btn_tab"
+                style="@style/TerminalButton"
+                android:text="TAB" />
+
+            <Button
+                android:id="@+id/btn_up"
+                style="@style/TerminalButton"
+                android:text="▲" />
+
+            <Button
+                android:id="@+id/btn_down"
+                style="@style/TerminalButton"
+                android:text="▼" />
+
+            <Button
+                android:id="@+id/btn_left"
+                style="@style/TerminalButton"
+                android:text="◀" />
+
+            <Button
+                android:id="@+id/btn_right"
+                style="@style/TerminalButton"
+                android:text="▶" />
+
+            <Button
+                android:id="@+id/btn_home"
+                style="@style/TerminalButton"
+                android:text="HOME" />
+
+            <Button
+                android:id="@+id/btn_end"
+                style="@style/TerminalButton"
+                android:text="END" />
+
+            <Button
+                android:id="@+id/btn_pgup"
+                style="@style/TerminalButton"
+                android:text="PGUP" />
+
+            <Button
+                android:id="@+id/btn_pgdn"
+                style="@style/TerminalButton"
+                android:text="PGDN" />
+
+        </LinearLayout>
+    </HorizontalScrollView>
+
+</RelativeLayout>

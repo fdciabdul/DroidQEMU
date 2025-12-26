@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <style name="Theme.AndroidInAndroid" parent="android:Theme.Material.Light.NoActionBar" />
+
+    <style name="Theme.Terminal" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="android:windowBackground">#000000</item>
+        <item name="android:statusBarColor">#000000</item>
+        <item name="android:navigationBarColor">#1a1a1a</item>
+    </style>
+
+    <style name="TerminalButton" parent="Widget.MaterialComponents.Button.TextButton">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">40dp</item>
+        <item name="android:minWidth">48dp</item>
+        <item name="android:textColor">#FFFFFF</item>
+        <item name="android:textSize">12sp</item>
+        <item name="android:background">@drawable/terminal_button_bg</item>
+        <item name="android:layout_margin">2dp</item>
+    </style>
+</resources>
