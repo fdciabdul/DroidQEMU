@@ -34,21 +34,19 @@ class VncActivity : AppCompatActivity() {
     private lateinit var progressBar: ProgressBar
     private lateinit var statusText: TextView
     private lateinit var controlToolbar: LinearLayout
+    private lateinit var keyboardContainer: android.widget.FrameLayout
     private lateinit var btnKeyboard: ImageButton
     private lateinit var btnLeftClick: ImageButton
     private lateinit var btnRightClick: ImageButton
-    private lateinit var btnCtrl: ImageButton
-    private lateinit var btnAlt: ImageButton
-    private lateinit var btnEsc: ImageButton
+    private lateinit var btnMiddleClick: ImageButton
 
     private var lastTouchX = 0
     private var lastTouchY = 0
-    private var isCtrlPressed = false
-    private var isAltPressed = false
-    private var currentMouseButton = 1 // 1=left, 4=right
+    private var currentMouseButton = 1 // 1=left, 2=middle, 4=right
+    private var keyboardVisible = false
 
-    // Custom input view for capturing keyboard
-    private lateinit var keyboardInputView: KeyboardInputView
+    // Virtual keyboard
+    private lateinit var virtualKeyboard: VirtualKeyboard
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -58,18 +56,18 @@ class VncActivity : AppCompatActivity() {
         progressBar = findViewById(R.id.progress_bar)
         statusText = findViewById(R.id.status_text)
         controlToolbar = findViewById(R.id.control_toolbar)
+        keyboardContainer = findViewById(R.id.keyboard_container)
         btnKeyboard = findViewById(R.id.btn_keyboard)
         btnLeftClick = findViewById(R.id.btn_left_click)
         btnRightClick = findViewById(R.id.btn_right_click)
-        btnCtrl = findViewById(R.id.btn_ctrl)
-        btnAlt = findViewById(R.id.btn_alt)
-        btnEsc = findViewById(R.id.btn_esc)
+        btnMiddleClick = findViewById(R.id.btn_middle_click)
 
-        // Create keyboard input view
-        keyboardInputView = KeyboardInputView(this)
-        keyboardInputView.setOnKeyListener { key, down ->
-            sendKeyWithModifiers(key, down)
+        // Create virtual keyboard
+        virtualKeyboard = VirtualKeyboard(this)
+        virtualKeyboard.setOnKeyListener { keySym, down ->
+            vncClient.sendKeyEvent(keySym, down)
         }
+        keyboardContainer.addView(virtualKeyboard)
 
         val host = intent.getStringExtra(EXTRA_HOST) ?: "127.0.0.1"
         val port = intent.getIntExtra(EXTRA_PORT, 5900)
@@ -82,35 +80,12 @@ class VncActivity : AppCompatActivity() {
     }
 
     private fun setupToolbarButtons() {
-        // Set button icons with text
-        btnCtrl.apply {
-            setImageDrawable(null)
-            background = createButtonBackground(false)
-        }
-        btnAlt.apply {
-            setImageDrawable(null)
-            background = createButtonBackground(false)
-        }
-        btnEsc.apply {
-            setImageDrawable(null)
-            background = createButtonBackground(false)
-        }
-
-        // Add text views for Ctrl, Alt, Esc
-        (btnCtrl as? ImageButton)?.let {
-            it.setImageDrawable(TextDrawable(this, "Ctrl"))
-        }
-        (btnAlt as? ImageButton)?.let {
-            it.setImageDrawable(TextDrawable(this, "Alt"))
-        }
-        (btnEsc as? ImageButton)?.let {
-            it.setImageDrawable(TextDrawable(this, "Esc"))
-        }
-
+        // Keyboard toggle
         btnKeyboard.setOnClickListener {
             toggleKeyboard()
         }
 
+        // Mouse buttons
         btnLeftClick.setOnClickListener {
             currentMouseButton = 1
             updateMouseButtonHighlight()
@@ -121,75 +96,24 @@ class VncActivity : AppCompatActivity() {
             updateMouseButtonHighlight()
         }
 
-        btnCtrl.setOnClickListener {
-            isCtrlPressed = !isCtrlPressed
-            btnCtrl.background = createButtonBackground(isCtrlPressed)
-            if (isCtrlPressed) {
-                vncClient.sendKeyEvent(X11KeySyms.XK_Control_L, true)
-            } else {
-                vncClient.sendKeyEvent(X11KeySyms.XK_Control_L, false)
-            }
-        }
-
-        btnAlt.setOnClickListener {
-            isAltPressed = !isAltPressed
-            btnAlt.background = createButtonBackground(isAltPressed)
-            if (isAltPressed) {
-                vncClient.sendKeyEvent(X11KeySyms.XK_Alt_L, true)
-            } else {
-                vncClient.sendKeyEvent(X11KeySyms.XK_Alt_L, false)
-            }
-        }
-
-        btnEsc.setOnClickListener {
-            vncClient.sendKeyEvent(X11KeySyms.XK_Escape, true)
-            vncClient.sendKeyEvent(X11KeySyms.XK_Escape, false)
+        btnMiddleClick.setOnClickListener {
+            currentMouseButton = 2
+            updateMouseButtonHighlight()
         }
 
         updateMouseButtonHighlight()
     }
 
-    private fun createButtonBackground(pressed: Boolean): GradientDrawable {
-        return GradientDrawable().apply {
-            shape = GradientDrawable.RECTANGLE
-            cornerRadius = 8f * resources.displayMetrics.density
-            setColor(if (pressed) 0xFF4CAF50.toInt() else 0x00000000)
-        }
-    }
-
     private fun updateMouseButtonHighlight() {
         btnLeftClick.alpha = if (currentMouseButton == 1) 1.0f else 0.5f
+        btnMiddleClick.alpha = if (currentMouseButton == 2) 1.0f else 0.5f
         btnRightClick.alpha = if (currentMouseButton == 4) 1.0f else 0.5f
     }
 
     private fun toggleKeyboard() {
-        val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-
-        // Add keyboard input view if not already added
-        if (keyboardInputView.parent == null) {
-            (window.decorView as? android.view.ViewGroup)?.addView(keyboardInputView)
-        }
-
-        keyboardInputView.requestFocus()
-        imm.showSoftInput(keyboardInputView, InputMethodManager.SHOW_FORCED)
-    }
-
-    private fun sendKeyWithModifiers(keySym: Int, down: Boolean) {
-        vncClient.sendKeyEvent(keySym, down)
-
-        // Release modifiers after key press if they were held
-        if (!down && (isCtrlPressed || isAltPressed)) {
-            if (isCtrlPressed) {
-                vncClient.sendKeyEvent(X11KeySyms.XK_Control_L, false)
-                isCtrlPressed = false
-                btnCtrl.background = createButtonBackground(false)
-            }
-            if (isAltPressed) {
-                vncClient.sendKeyEvent(X11KeySyms.XK_Alt_L, false)
-                isAltPressed = false
-                btnAlt.background = createButtonBackground(false)
-            }
-        }
+        keyboardVisible = !keyboardVisible
+        keyboardContainer.visibility = if (keyboardVisible) View.VISIBLE else View.GONE
+        btnKeyboard.alpha = if (keyboardVisible) 1.0f else 0.7f
     }
 
     private fun connectToVnc(host: String, port: Int) {
@@ -593,8 +517,12 @@ object X11KeySyms {
     const val XK_F11 = 0xffc8
     const val XK_F12 = 0xffc9
     const val XK_Shift_L = 0xffe1
+    const val XK_Shift_R = 0xffe2
     const val XK_Control_L = 0xffe3
+    const val XK_Control_R = 0xffe4
+    const val XK_Caps_Lock = 0xffe5
     const val XK_Alt_L = 0xffe9
+    const val XK_Alt_R = 0xffea
     const val XK_space = 0x0020
     const val XK_exclam = 0x0021
     const val XK_quotedbl = 0x0022
